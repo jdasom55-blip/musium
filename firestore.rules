@@ -1,0 +1,221 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global hardened helpers
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+    function incoming() {
+      return request.resource.data;
+    }
+    function existing() {
+      return resource.data;
+    }
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    // Artwork blueprint validation
+    function isValidArtwork(data) {
+      return data.keys().hasAll([
+        'title',
+        'artistName',
+        'imageDataUrl',
+        'compressedSizeBytes',
+        'width',
+        'height',
+        'authorUid',
+        'status',
+        'createdAt',
+        'updatedAt'
+      ])
+      && data.keys().hasOnly([
+        'title',
+        'artistName',
+        'description',
+        'imageDataUrl',
+        'compressedSizeBytes',
+        'width',
+        'height',
+        'authorUid',
+        'status',
+        'createdAt',
+        'updatedAt'
+      ])
+      && data.title is string && data.title.size() >= 1 && data.title.size() <= 80
+      && data.artistName is string && data.artistName.size() >= 1 && data.artistName.size() <= 50
+      && (!('description' in data) || (data.description is string && data.description.size() <= 500))
+      && data.imageDataUrl is string && data.imageDataUrl.size() >= 20 && data.imageDataUrl.size() <= 920000
+      && data.compressedSizeBytes is number && data.compressedSizeBytes > 0 && data.compressedSizeBytes <= 1048576
+      && data.width is number && data.width > 0 && data.width <= 4096
+      && data.height is number && data.height > 0 && data.height <= 4096
+      && isValidId(data.authorUid) && data.authorUid == request.auth.uid
+      && data.status == 'published'
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidReviewerUid(uid) {
+      return (isVerifiedUser() && isValidId(uid) && uid == request.auth.uid)
+        || (request.auth == null && uid == 'guest');
+    }
+
+    // ArtworkComment blueprint validation
+    function isValidArtworkComment(data, artworkId) {
+      return data.keys().hasAll([
+        'artworkId',
+        'visitorName',
+        'content',
+        'authorUid',
+        'status',
+        'createdAt',
+        'updatedAt'
+      ])
+      && data.keys().hasOnly([
+        'artworkId',
+        'visitorName',
+        'content',
+        'authorUid',
+        'status',
+        'createdAt',
+        'updatedAt'
+      ])
+      && isValidId(data.artworkId) && data.artworkId == artworkId
+      && data.visitorName is string && data.visitorName.size() >= 1 && data.visitorName.size() <= 40
+      && data.content is string && data.content.size() >= 1 && data.content.size() <= 500
+      && isValidReviewerUid(data.authorUid)
+      && data.status == 'visible'
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    // CuratedReview blueprint validation
+    function isValidCuratedReview(data) {
+      return data.keys().hasAll([
+        'curatedId',
+        'visitorName',
+        'content',
+        'authorUid',
+        'status',
+        'createdAt',
+        'updatedAt'
+      ])
+      && data.keys().hasOnly([
+        'curatedId',
+        'visitorName',
+        'content',
+        'authorUid',
+        'status',
+        'createdAt',
+        'updatedAt'
+      ])
+      && data.curatedId in [
+        'curated-solstice',
+        'curated-botanical',
+        'curated-nocturne',
+        'curated-terracotta'
+      ]
+      && data.visitorName is string && data.visitorName.size() >= 1 && data.visitorName.size() <= 40
+      && data.content is string && data.content.size() >= 1 && data.content.size() <= 500
+      && isValidReviewerUid(data.authorUid)
+      && data.status == 'visible'
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    // /artworks collection
+    match /artworks/{artworkId} {
+      allow get: if isValidId(artworkId) && resource.data.status == 'published';
+      allow list: if resource.data.status == 'published';
+
+      allow create: if isVerifiedUser()
+        && isValidId(artworkId)
+        && isValidArtwork(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(artworkId)
+        && existing().authorUid == request.auth.uid
+        && isValidArtwork(incoming())
+        && incoming().authorUid == existing().authorUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['title', 'artistName', 'description', 'updatedAt'])
+        );
+
+      allow delete: if isVerifiedUser()
+        && isValidId(artworkId)
+        && existing().authorUid == request.auth.uid;
+
+      // /artworks/{artworkId}/comments subcollection
+      match /comments/{commentId} {
+        allow get: if isValidId(artworkId) && isValidId(commentId) && resource.data.status == 'visible';
+        allow list: if resource.data.status == 'visible';
+
+        allow create: if isValidId(artworkId)
+          && isValidId(commentId)
+          && isValidArtworkComment(incoming(), artworkId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && get(/databases/$(database)/documents/artworks/$(artworkId)).data.status == 'published';
+
+        allow update: if isVerifiedUser()
+          && isValidId(artworkId)
+          && isValidId(commentId)
+          && existing().authorUid == request.auth.uid
+          && isValidArtworkComment(incoming(), artworkId)
+          && incoming().artworkId == existing().artworkId
+          && incoming().authorUid == existing().authorUid
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && get(/databases/$(database)/documents/artworks/$(artworkId)).data.status == 'published'
+          && (
+            incoming().diff(existing()).affectedKeys().hasOnly(['visitorName', 'content', 'updatedAt'])
+          );
+
+        allow delete: if isVerifiedUser()
+          && isValidId(artworkId)
+          && isValidId(commentId)
+          && existing().authorUid == request.auth.uid;
+      }
+    }
+
+    // /curated_reviews collection (for permanent exhibition artworks)
+    match /curated_reviews/{reviewId} {
+      allow get: if isValidId(reviewId) && resource.data.status == 'visible';
+      allow list: if resource.data.status == 'visible';
+
+      allow create: if isValidId(reviewId)
+        && isValidCuratedReview(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(reviewId)
+        && existing().authorUid == request.auth.uid
+        && isValidCuratedReview(incoming())
+        && incoming().curatedId == existing().curatedId
+        && incoming().authorUid == existing().authorUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['visitorName', 'content', 'updatedAt'])
+        );
+
+      allow delete: if isVerifiedUser()
+        && isValidId(reviewId)
+        && existing().authorUid == request.auth.uid;
+    }
+  }
+}

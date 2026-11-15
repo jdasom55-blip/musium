@@ -1,0 +1,25 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-serif-display: 'Cormorant Garamond', 'Noto Serif KR', Georgia, serif;
+    --font-sans-body: 'Plus Jakarta Sans', 'Noto Sans KR', system-ui, -apple-system, sans-serif;
+    --font-mono-data: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  }
+
+  body {
+    font-family: var(--font-sans-body);
+    background-color: #FBF9F5;
+    color: #1C1917;
+    overflow-x: hidden;
+  }
+}
+
+.font-museum-serif {
+  font-family: var(--font-serif-display);
+}
+
+.font-museum-mono {
+  font-family: var(--font-mono-data);
+  font-variant-numeric: tabular-nums;
+}

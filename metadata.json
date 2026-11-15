@@ -1,0 +1,6 @@
+{
+  "name": "아틀리에 2D 가상 미술관",
+  "description": "2D 캐릭터를 움직이며 전시 작품을 감상하고, 1MB 이하로 압축한 나만의 미술작품을 업로드하여 감상평을 나누는 가상현실 미술관입니다.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
